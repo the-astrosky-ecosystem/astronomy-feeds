@@ -113,4 +113,5 @@ if [ $REFRESH_DB -eq 1 ]; then
 
         # now we can run the downloaded database file
         docker exec -it "AstroskyDB" psql -d devdb -f devdb.sql
+    fi
 fi
