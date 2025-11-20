@@ -102,7 +102,7 @@ fi
 if [ $REFRESH_DB -eq 1 ]; then
     #echo "Thanks for specifying the database-refresh option! :) This is currently under construction :( hopefully working soon!"
     curl -O http://astrosky.eco/download/devdb.sql
-    if [ -z "devdb.sql" ]; then
+    if [ ! -f "devdb.sql" ]; then
         echo "ERROR: download of devdb.sql was uncessful"
         exit 1
     else
