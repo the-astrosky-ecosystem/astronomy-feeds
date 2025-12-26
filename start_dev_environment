@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 
-# determine whether we have access to getopt
+##
+## determine whether we have access to getopt
+##
 if [ -z "$(which getopt)" ]; then
     GETOPT_PRESENT=0
 else
     GETOPT_PRESENT=1
 fi
 
-# function to print message explaining usage and exit, in case of incorrect usage
+##
+## function to print message explaining usage and exit, in case of incorrect usage
+##
 if [ $GETOPT_PRESENT -eq 1 ]; then
     print_usage_msg()
     {
@@ -22,7 +26,9 @@ else
     }
 fi
 
-# argument parsing and processing (for now assuming getopt...should amend this later)
+##
+## argument parsing and processing
+##
 REFRESH_DB=0
 
 if [ $GETOPT_PRESENT -eq 1 ]; then
@@ -64,54 +70,161 @@ else
     done
 fi
 
-# start container
-echo "Starting docker container AstroskyDB..."
-docker start "AstroskyDB" # assuming this is the name of the container with the PostgreSQL server
-CONTAINER_START_SUCCESS=$?
-if [ $? -ne 0 ]; then
-    echo "ERROR: unable to start container 'AstroskyDB'. Is the docker daemon running?"
-    exit 1
+##
+## setup/start container
+##
+
+# first check whether we have docker CLI access
+docker info > /dev/null 2>&1
+DOCKER_INFO_CODE=$?
+if [ $DOCKER_INFO_CODE -ne 0 ]; then
+    echo "ERROR: received error code when accessing docker CLI; is the daemon running?"
+    echo "Exiting with code from command 'docker info'"
+    exit $DOCKER_INFO_CODE
+    # TODO we could start the docker daemon, if we know some details about the install
 fi
-echo "...done."
 
-# check pg_dump compatibility between server in container and out of container install
-echo "Checking pg_dump compatibilty between server and client..."
-if [ -z "$(which pg_dump)" ]; then
-    echo "ERROR: pg_dump not accessible"
-    exit 1
-else
-    pg_dump_version="$(pg_dump --version)"
-    version_number=$(echo $pg_dump_local_version | cut -d ' ' -f 3)
-    major_local=${version_number%%.*}
-    minor_local=${version_number##*.}
+# given CLI access, we can start or set up the appropriate container
+if [ -z "$(docker ps | grep AstroskyDB)" ]; then
+    echo "Couldn't find container 'AstroskyDB'; setting up container..."
 
-    pg_dump_version="$(docker exec -it "AstroskyDB" pg_dump --version)"
-    version_number=$(echo $pg_dump_local_version | cut -d ' ' -f 3)
-    major_docker=${version_number%%.*}
-    minor_docker=${version_number##*.}
+    # get image
+    echo "Pulling postgres:alpine image..."
+    docker pull postgres:alpine
 
-    if [[ $major_docker -gt $major_local ||  $minor_docker -gt $minor_local ]]; then # right only checked if left false
-        echo "ERROR: version mismatch between pg_dump server (docker) version ($major_docker.$minor_docker) and client (system) version ($major_local.$minor_local)"
-        exit 1
+    # create volume for persistent data if none already exists
+    docker volume inspect postgres-data > /dev/null 2>&1
+    DOCKER_VOLUME_INSPECT_CODE=$?
+    if [ $DOCKER_VOLUME_INSPECT_CODE -ne 0 ]; then
+        echo "Creating volume 'postgres-data'..."
+        docker volume create postgres-data > /dev/null 2>&1
+        echo "...volume created."
     else
-        echo "...compatible."
+        echo "Found pre-existing volume called 'postgres-data', binding to new container as PostgreSQL data volume."
     fi
+
+    # set up the AstroskyDB container
+    echo "Creating new container 'AstroskyDB...'"
+    read -s -p "Please enter a password to use for the PostreSQL server and database: " USER_PASSWORD; echo;
+    docker run --name AstroskyDB -e POSTGRES_PASSWORD=$USER_PASSWORD -d -p 5432:5432 -v postgres-data:/var/lib/postgresql/data -d postgres:alpine > /dev/null 2>&1
+    echo "...container created."
+    while [ "$(docker container inspect -f {{.State.Running}} AstroskyDB)" == "false" ]
+    do
+        echo "Waiting for docker container to start before proceeding."
+        sleep 0.5
+    done
+
+    # set up PostreSQL database in container (only after server comes online)
+    until [ "$(docker exec AstroskyDB pg_isready -h localhost -p 5432)" == "localhost:5432 - accepting connections" ]
+    do
+        echo "Waiting for server to come online before creating database."
+        sleep 1
+    done
+    echo "Creating database 'bluesky_astronomy'..."
+    docker exec -it "AstroskyDB" psql -U postgres -c 'CREATE DATABASE bluesky_astronomy;' > /dev/null 2>&1
+    echo "...database created."
+
+    until [ "$(sudo docker exec "AstroskyDB" psql -U postgres -Atq -c "SELECT COUNT(datname) FROM pg_database WHERE datname = 'bluesky_astronomy'")" -eq 1 ]
+    do
+        echo "Waiting for database to be accessible before creating user."
+        sleep 1
+    done
+    echo "Creating user 'bluesky_astronomy'..."
+    docker exec -it "AstroskyDB" psql -U postgres -d bluesky_astronomy -c "CREATE USER bluesky_astronomy WITH ENCRYPTED PASSWORD '''$USER_PASSWORD''';"
+    echo "...user created."
+
+    until [ "$(sudo docker exec "AstroskyDB" psql -U postgres -Atq -c "SELECT COUNT(rolname) FROM pg_roles WHERE rolname = 'bluesky_astronomy'")" -eq 1 ]
+    do
+        echo "Waiting for user creation to finish before granting privileges."
+        sleep 1
+    done
+    echo "Granting privileges on database..."
+    docker exec -it "AstroskyDB" psql -U postgres -d bluesky_astronomy -c 'GRANT ALL PRIVILEGES ON DATABASE bluesky_astronomy TO bluesky_astronomy;'
+    echo "...privileges granted."
+
+    # if not already given argument to refresh database, check if user wants to populate new database now
+    if [ $REFRESH_DB -eq 0 ]; then
+        echo "Database is set up, but has no data."
+        read -p "Would you like to retrieve the latest dev database data? (y for yes): " REFRESH_RESPONSE
+        if [ "$REFRESH_RESPONSE" == "y" ] || [ "$REFRESH_RESPONSE" == "Y" ]; then
+            REFRESH_DB=1
+        fi
+    fi
+else
+    echo "Starting docker container AstroskyDB..."
+    docker start "AstroskyDB" # assuming this is the name of the container with the PostgreSQL server
+    CONTAINER_START_CODE=$?
+    if [ $CONTAINER_START_CODE -ne 0 ]; then
+        echo "ERROR: unable to start container 'AstroskyDB'"
+        echo "Exiting with code from command 'docker start "AstroskyDB"'"
+        exit $CONTAINER_START_CODE
+    fi
+    echo "...done."
 fi
 
 # refresh database if requested
 if [ $REFRESH_DB -eq 1 ]; then
-    #echo "Thanks for specifying the database-refresh option! :) This is currently under construction :( hopefully working soon!"
-    curl -O http://astrosky.eco/download/devdb.sql
-    if [ ! -f "devdb.sql" ]; then
-        echo "ERROR: download of devdb.sql was uncessful"
+    echo "Getting newest developer database data..."
+
+    # check pg_dump compatibility between server in container and out of container install
+    if [ -z "$(which pg_dump)" ]; then
+        echo "ERROR: could not find pg_dump"
         exit 1
     else
-        if [ "$(docker exec -it "AstroskyDB" psql -U postgres -Atq -c "SELECT COUNT(datname) FROM pg_database WHERE datname = 'devdb'")" -eq 1 ]; then
-            # dev db already exists; potentially need to clean it before running script to repopulate
-        else
-            # dev db does not already exist, needs to be created and set up
+        pg_dump_version="$(pg_dump --version)"
+        version_number=$(echo $pg_dump_local_version | cut -d ' ' -f 3)
+        major_local=${version_number%%.*}
+        minor_local=${version_number##*.}
 
-        # now we can run the downloaded database file
-        docker exec -it "AstroskyDB" psql -d devdb -f devdb.sql
+        pg_dump_version="$(docker exec -it "AstroskyDB" pg_dump --version)"
+        version_number=$(echo $pg_dump_local_version | cut -d ' ' -f 3)
+        major_docker=${version_number%%.*}
+        minor_docker=${version_number##*.}
+
+        if [[ $major_docker -gt $major_local ||  $minor_docker -gt $minor_local ]]; then # right only checked if left false
+            echo "ERROR: found pg_dump version mismatch between docker container ($major_docker.$minor_docker) and external environment ($major_local.$minor_local)"
+            exit 1
+        fi
+    fi
+
+    # download latest dev database dump
+    DEV_DB_SIZE="$(curl -sI http://astrosky.eco/download/devdb.sql | grep -i Content-Length | cut -d ' ' -f 2 | tr -d '\r' | numfmt --to=iec)"
+    read -p "Need to download data file of size ~$DEV_DB_SIZE (will be removed after); \
+             is this ok? (y to continue, anything else to abort): " DOWNLOAD_RESPONSE
+    if [ "$DOWNLOAD_RESPONSE" == "y" ] || [ "$DOWNLOAD_RESPONSE" == "Y" ]; then
+        curl -O http://astrosky.eco/download/devdb.sql
+        if [ ! -f "devdb.sql" ]; then
+            echo "ERROR: download of devdb.sql was unsuccessful"
+            exit 1
+        else
+            echo "Successfully downloaded new database data to file 'devdb.sql'."
+        fi
+    else
+        echo "Exiting without downloading new database file"
+        exit 0;
+    fi
+
+    # update database with new data
+    if [ "$(sudo docker exec "AstroskyDB" psql -U postgres -Atq -c "SELECT COUNT(datname) FROM pg_database WHERE datname = 'bluesky_astronomy'")" -eq 1 ]; then
+        if [ "data in database" ]; then
+            echo "WARNING: found pre-existing database named 'bluesky_astronomy', continuing from here will permanently delete all current local data in favor of new data."
+            read -p "Continue? (y to proceed): " OVERWRITE_RESPONSE; echo;
+            if [ "$DOWNLOAD_RESPONSE" == "y" ] || [ "$DOWNLOAD_RESPONSE" == "Y" ]; then
+                # TODO: clean devdb
+            else
+                echo "Exiting without overwriting current database data."
+                exit 0;
+            fi
+        else
+            echo "Empty database named 'bluesky_astronomy' exists, populating with downloaded data..."
+    else
+        # TODO: dev db does not already exist, needs to be created and set up
+
+    # now we can run the downloaded database file
+    docker exec -it "AstroskyDB" psql -d devdb -f devdb.sql
+
+    # remove database file
+    rm devdb.sql
+
     fi
 fi
