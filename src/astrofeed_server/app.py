@@ -1,3 +1,5 @@
+import os
+
 import signal
 from threading import Thread, Event
 from typing import Final
@@ -261,7 +263,15 @@ def get_feed_log_by_date():
 
 @app.route("/download/devdb.sql", methods=["GET"])
 def download_dev_db():
-    return send_from_directory(current_app.root_path, "devdb.sql")
+    # specify wherever the file is kept (relative to application root path)
+    download_dir = os.path.join(current_app.root_path, "downloadable_files")
+    file_path = os.path.join(download_dir, "devdb.sql")
+    logger.debug(f"looking for file to download at: {file_path}")
+    if os.path.isfile(file_path):
+        return send_from_directory(download_dir, "devdb.sql")
+    else:
+        logger.warning(f"Could not locate file at {file_path} to send for download.", exc_info=True)
+        return "couldn't find the dev database file sorry :/"
 
 # -----------------------------------
 # LOGGING HANDLERS
