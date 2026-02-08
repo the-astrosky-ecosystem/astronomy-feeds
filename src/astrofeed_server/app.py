@@ -264,7 +264,7 @@ def get_feed_log_by_date():
 @app.route("/api/dev.downloadDevDB", methods=["GET"])
 def download_dev_db():
     # specify wherever the file is kept (relative to application root path)
-    download_dir = os.path.join(current_app.root_path, "downloadable_files")
+    download_dir = os.path.join(current_app.root_path, "../../files")
     file_path = os.path.join(download_dir, "devdb.sql")
     logger.debug(f"looking for file to download at: {file_path}")
     if os.path.isfile(file_path):
