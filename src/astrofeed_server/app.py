@@ -261,7 +261,7 @@ def get_feed_log_by_date():
         return "Ensure the Date is in YYYY-MM-DD format", 400
     return jsonify(body)
 
-@app.route("/download/devdb.sql", methods=["GET"])
+@app.route("/api/dev.downloadDevDB", methods=["GET"])
 def download_dev_db():
     # specify wherever the file is kept (relative to application root path)
     download_dir = os.path.join(current_app.root_path, "downloadable_files")
