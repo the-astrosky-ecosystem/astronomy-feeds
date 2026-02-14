@@ -268,7 +268,7 @@ def download_dev_db():
     if (dev_token := os.getenv("ASTROFEED_DEV_TOKEN", "")) == "":
         logger.error("Developer database download token is not set, or is empty; aborting download.")
         return "Missing Token", 400
-    elif (token := request.args.get("token", default=None, type=str)) != dev_token:
+    elif (request.args.get("token", default=None, type=str)) != dev_token:
         logger.warning("retrieved token does not match stored token; aborting download.")
         return "wrong token value, aborting download"
 
