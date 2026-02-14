@@ -262,7 +262,16 @@ def get_feed_log_by_date():
     return jsonify(body)
 
 @app.route("/api/dev.downloadDevDB", methods=["GET"])
+# http://127.0.0.1:8000/api/dev.downloadDevDB?token=dev_secret
 def download_dev_db():
+    # authenticate
+    if (dev_token := os.getenv("ASTROFEED_DEV_TOKEN", "")) == "":
+        logger.error("Developer database download token is not set, or is empty; aborting download.")
+        return "Missing Token", 400
+    elif (token := request.args.get("token", default=None, type=str)) != dev_token:
+        logger.warning("retrieved token does not match stored token; aborting download.")
+        return "wrong token value, aborting download"
+
     # specify wherever the file is kept (relative to application root path)
     download_dir = os.path.join(current_app.root_path, "../../files")
     file_path = os.path.join(download_dir, "devdb.sql")
