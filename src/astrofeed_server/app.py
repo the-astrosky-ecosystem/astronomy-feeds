@@ -1,4 +1,5 @@
 import signal
+
 from threading import Thread, Event
 from typing import Final
 
@@ -17,18 +18,26 @@ from astrofeed_server.request_log import request_log
 from astrofeed_server.cors import enable_cross_origin_requests
 from astrofeed_server.pinned import add_pinned_post_to_feed
 
+from .atmos.auth import atmos_blueprint, set_up_web_key
 
 # -----------------------------------
 # CONFIGURATION
 # -----------------------------------
 _FEED_LOG_RETURN_LIMIT: Final[int] = 50
 
+# todo: figure out why this isn't called automatically
+from dotenv import load_dotenv
+load_dotenv()
 
 # -----------------------------------
 # APP DEFINITION
 # -----------------------------------
 # Initialize the app
 app = Flask(__name__)
+app.config.from_prefixed_env()
+app.register_blueprint(atmos_blueprint, url_prefix="/atmos")
+
+set_up_web_key(app)
 
 # Allow cross-origin requests at the Flask level if NOT running in production.
 # This allows frontend components that use this API to be easily developed with a local

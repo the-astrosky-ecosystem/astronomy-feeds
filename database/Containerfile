@@ -1,0 +1,9 @@
+FROM docker.io/postgres:16.11-alpine
+
+RUN echo "create role aob_service;" > docker-entrypoint-initdb.d/create_role.sql
+COPY devdb_20260126.sql /docker-entrypoint-initdb.d/
+
+# podman build -t astroskypgi .
+# podman run -p 5432:5432 -e POSTGRES_PASSWORD=astrosky -v data:/var/lib/postgresql/data --name astrosky astroskypgi
+
+
