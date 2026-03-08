@@ -46,7 +46,7 @@ BLUESKY_DATABASE = os.environ.get("BLUESKY_DATABASE", None)
 # Server host variables for astrofeed-server - i.e., where on the internet our ATProto
 # endpoints live
 # Todo: these should probably live in the Flask app, as it's the only place where they're used
-HOSTNAME = "feed-all.astronomy.blue"
+HOSTNAME = "feeds.astrosky.eco"
 SERVICE_DID = f"did:web:{HOSTNAME}"
 
 # ----------------------------------------------
