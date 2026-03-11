@@ -333,16 +333,43 @@ class NormalizedFeedStats(BaseModel):
 #     uri = peewee.CharField()
 #     cid = peewee.CharField()
 
+class OauthRequest(BaseModel):
+    state = peewee.CharField(primary_key=True, index=True, null=False)
+    authserver_iss = peewee.CharField(null=False)
+    did = peewee.CharField()
+    handle  = peewee.CharField()
+    pds_url = peewee.CharField()
+    pkce_verifier = peewee.CharField(null=False)
+    scope = peewee.CharField(null=False)
+    dpop_authserver_nonce = peewee.CharField(null=False)
+    dpop_private_jwk = peewee.CharField(null=False)
 
-# with DBConnection() as conn:
-#     conn.create_tables(
-#         [
-#             Post,
-#             SubscriptionState,
-#             Account,
-#             BotActions,
-#             ModActions,
-#             ActivityLog,
-#             NormalizedFeedStats,
-#         ]
-#     )
+
+class OauthSession(BaseModel):
+    did = peewee.CharField(primary_key=True, index=True, null=False)
+    handle = peewee.CharField()
+    pds_url = peewee.CharField(null=False)
+    authserver_iss = peewee.CharField(null=False)
+    access_token = peewee.CharField()
+    refresh_token = peewee.CharField()
+    dpop_authserver_nonce  = peewee.CharField(null=False)
+    dpop_pds_nonce = peewee.CharField()
+    dpop_private_jwk = peewee.CharField(null=False)
+
+
+
+
+with DBConnection() as conn:
+    conn.create_tables(
+        [
+            Post,
+            SubscriptionState,
+            Account,
+            BotActions,
+            ModActions,
+            ActivityLog,
+            NormalizedFeedStats,
+            OauthRequest,
+            OauthSession
+        ]
+    )

@@ -1,9 +1,10 @@
 import signal
-
+import json
 from threading import Thread, Event
 from typing import Final
 
 from flask import Flask, jsonify, request, Response
+from authlib.jose import JsonWebKey
 
 from astrofeed_lib import config, logger
 from astrofeed_lib.algorithm import (
@@ -18,7 +19,7 @@ from astrofeed_server.request_log import request_log
 from astrofeed_server.cors import enable_cross_origin_requests
 from astrofeed_server.pinned import add_pinned_post_to_feed
 
-from .atmos.auth import atmos_blueprint, set_up_web_key
+from .atmos.auth import atmos_blueprint
 
 # -----------------------------------
 # CONFIGURATION
@@ -37,7 +38,19 @@ app = Flask(__name__)
 app.config.from_prefixed_env()
 app.register_blueprint(atmos_blueprint, url_prefix="/atmos")
 
-set_up_web_key(app)
+
+# Load JWK
+#
+app_client__secret__jwk = JsonWebKey.import_key(app.config["CLIENT_SECRET_JWK"])
+app_client__public__jwk = json.loads(app_client__secret__jwk.as_json(is_private=False))
+
+del app.config["CLIENT_SECRET_JWK"]
+app.config["APP_CLIENT__SECRET__JWK"] = app_client__secret__jwk
+app.config["APP_CLIENT__PUBLIC__JWK"] = app_client__public__jwk
+
+# Defensively check that the public JWK is really public and didn't somehow end up with secret cryptographic key info
+assert "d" not in app.config["APP_CLIENT__PUBLIC__JWK"]
+
 
 # Allow cross-origin requests at the Flask level if NOT running in production.
 # This allows frontend components that use this API to be easily developed with a local
@@ -293,10 +306,11 @@ log_dumper.start()
 
 def shutdown_handler(signum, frame):
     logger.warn("Shutting down Flask server...")
+
     # Perform cleanup tasks here, e.g., closing database connections,
     # releasing resources, etc.
-    if not get_database().is_closed():
-        teardown_connection(get_database())
+    _db_close(None)
+
     # set stop event on the log dumper thread so it can clean up gracefully before exiting
     log_dumper_stop_event.set()
     exit(0)

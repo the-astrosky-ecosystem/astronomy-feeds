@@ -1,23 +1,16 @@
 import regex
-import json
 
-from urllib.parse import urlencode, urlparse
 from authlib.jose import JsonWebKey
-from flask import Blueprint, flash, request, redirect
+from urllib.parse import urlencode, urlparse
+
+from flask import Blueprint, flash, request, redirect, current_app, session
+
+from astrofeed_lib.database import get_database
 
 from .identity import is_valid_handle, is_valid_did, resolve_identity, pds_endpoint
-from .oauth import resolve_pds_authserver, fetch_authserver_meta, send_par_auth_request
+from .oauth import resolve_pds_authserver, fetch_authserver_meta, send_par_auth_request, initial_token_request
 from .security import is_safe_url
 
-
-def set_up_web_key(app):
-	global CLIENT_SECRET_JWK
-	# This is a "confidential" OAuth client, meaning it has access to a persistent secret signing key. parse that key as a global.
-	CLIENT_SECRET_JWK = JsonWebKey.import_key(app.config["CLIENT_SECRET_JWK"])
-
-	# Defensively check that the public JWK is really public and didn't somehow end up with secret cryptographic key info
-	CLIENT_PUB_JWK = json.loads(CLIENT_SECRET_JWK.as_json(is_private=False))
-	assert "d" not in CLIENT_PUB_JWK
 
 # OAuth scopes requested by this app (goes in the client metadata, and authorization requests)
 OAUTH_SCOPE = "atproto repo:app.bsky.feed.post?action=create"
@@ -96,7 +89,7 @@ def oauth_login():
 		client_id,
 		redirect_uri,
 		OAUTH_SCOPE,
-		CLIENT_SECRET_JWK,
+		current_app.config["APP_CLIENT__SECRET__JWK"],
 		dpop_private_jwk,
 	)
 	if resp.status_code == 400:
@@ -106,27 +99,118 @@ def oauth_login():
 	par_request_uri = resp.json()["request_uri"]
 
 	print(f"SHOULD BE saving oauth_auth_request to DB  state={state}")
-	# query_db(
-	# 	"INSERT INTO oauth_auth_request (state, authserver_iss, did, handle, pds_url, pkce_verifier, scope, dpop_authserver_nonce, dpop_private_jwk) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);",
-	# 	[
-	# 		state,
-	# 		authserver_meta["issuer"],
-	# 		did,  # might be None
-	# 		handle,  # might be None
-	# 		pds_url,  # might be None
-	# 		pkce_verifier,
-	# 		OAUTH_SCOPE,
-	# 		dpop_authserver_nonce,
-	# 		dpop_private_jwk.as_json(is_private=True),
-	# 	],
-	# )
+
+	get_database().execute_sql("""
+		INSERT INTO oauthrequest
+		(state, authserver_iss, did, handle, pds_url, pkce_verifier, scope, dpop_authserver_nonce, dpop_private_jwk)  
+		VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s);
+		""",
+		[
+			state,
+			authserver_meta["issuer"],
+			did,  # might be None
+			handle,  # might be None
+			pds_url,  # might be None
+			pkce_verifier,
+			OAUTH_SCOPE,
+			dpop_authserver_nonce,
+			dpop_private_jwk.as_json(is_private=True),
+		],
+	)
 
 	# Forward the user to the Authorization Server to complete the browser auth flow.
 	# IMPORTANT: Authorization endpoint URL is untrusted input, security mitigations are needed before redirecting user
 	auth_url = authserver_meta["authorization_endpoint"]
 	assert is_safe_url(auth_url)
 	qparam = urlencode({"client_id": client_id, "request_uri": par_request_uri})
+
+
+	print("redirect url is", f"{auth_url}?{qparam}" )
+
 	return redirect(f"{auth_url}?{qparam}")
+
+
+# Endpoint for receiving "callback" responses from the Authorization Server, to complete the auth flow.
+@atmos_blueprint.route("/callback")
+def oauth_callback():
+	if error := request.args.get("error"):
+		error_description = request.args.get("error_description", "")
+		flash(f"Authorization failed: {error}: {error_description}", "error")
+		return redirect("/atmos/login")
+
+	state = request.args["state"]
+	authserver_iss = request.args["iss"]
+	authorization_code = request.args["code"]
+
+	# Lookup auth request by the "state" token (which we randomly generated earlier)
+	# row = query_db(
+	# 	"SELECT * FROM oauth_auth_request WHERE state = ?;",
+	# 	[state],
+	# 	one=True,
+	# )
+	# if row is None:
+	# 	abort(400, "OAuth request not found")
+	#
+	# # Delete row to prevent response replay
+	# query_db("DELETE FROM oauth_auth_request WHERE state = ?;", [state])
+	#
+	# # Verify query param "iss" against earlier oauth request "iss"
+	# assert row["authserver_iss"] == authserver_iss
+	# # This is redundant with the above SQL query, but also double-checking that the "state" param matches the original request
+	# assert row["state"] == state
+
+	# Complete the auth flow by requesting auth tokens from the authorization server.
+	client_id, redirect_uri = compute_client_id(request.url_root)
+	tokens, dpop_authserver_nonce = initial_token_request(
+		row,
+		authorization_code,
+		client_id,
+		redirect_uri,
+		current_app.config["APP_CLIENT__SECRET__JWK"],
+	)
+
+	# Now we verify the account authentication against the original request
+	if row["did"]:
+		# If we started with an account identifier, this is simple
+		did, handle, pds_url = row["did"], row["handle"], row["pds_url"]
+		assert tokens["sub"] == did
+	else:
+		# If we started with an auth server URL, now we need to resolve the identity
+		did = tokens["sub"]
+		assert is_valid_did(did)
+		did, handle, did_doc = resolve_identity(did)
+		pds_url = pds_endpoint(did_doc)
+		authserver_url = resolve_pds_authserver(pds_url)
+
+		# Verify that Authorization Server matches
+		assert authserver_url == authserver_iss
+
+	# Verify that returned scope matches request (waiting for PDS update)
+	assert row["scope"] == tokens["scope"]
+
+	# Save session (including auth tokens) in database
+	print(f"saving oauth_session to DB  {did}")
+	query_db(
+		"INSERT OR REPLACE INTO oauth_session (did, handle, pds_url, authserver_iss, access_token, refresh_token, dpop_authserver_nonce, dpop_private_jwk) VALUES(?, ?, ?, ?, ?, ?, ?, ?);",
+		[
+			did,
+			handle,
+			pds_url,
+			authserver_iss,
+			tokens["access_token"],
+			tokens["refresh_token"],
+			dpop_authserver_nonce,
+			row["dpop_private_jwk"],
+		],
+	)
+
+	# Set a (secure) session cookie in the user's browser, for authentication between the browser and this app
+	session["user_did"] = did
+	# Note that the handle might change over time, and should be re-resolved periodically in a real app
+	session["user_handle"] = handle
+
+	return redirect("/bsky/post")
+
 
 
 # Dynamically compute our "client_id" based on the request HTTP Host
@@ -134,7 +218,7 @@ def compute_client_id(url_root):
 	parsed_url = urlparse(url_root)
 	if parsed_url.hostname in ["localhost", "127.0.0.1"]:
 		# for localhost testing, see https://atproto.com/specs/oauth#localhost-client-development
-		redirect_uri = f"http://127.0.0.1:{parsed_url.port}/oauth/callback"
+		redirect_uri = f"http://127.0.0.1:{parsed_url.port}/atmos/callback"
 		client_id = "http://localhost?" + urlencode({
 			"redirect_uri": redirect_uri,
 			"scope": OAUTH_SCOPE,
