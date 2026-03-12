@@ -3,9 +3,9 @@ import regex
 from authlib.jose import JsonWebKey
 from urllib.parse import urlencode, urlparse
 
-from flask import Blueprint, flash, request, redirect, current_app, session
+from flask import Blueprint, flash, request, redirect, current_app, session, abort
 
-from astrofeed_lib.database import get_database
+from astrofeed_lib.database import get_database, OauthRequest
 
 from .identity import is_valid_handle, is_valid_did, resolve_identity, pds_endpoint
 from .oauth import resolve_pds_authserver, fetch_authserver_meta, send_par_auth_request, initial_token_request
@@ -75,7 +75,7 @@ def oauth_login():
 		flash("Failed to fetch Auth Server (Entryway) OAuth metadata", "error")
 		return "Error: Failed to fetch Auth Server (Entryway) OAuth metadata"
 
-	# Generate DPoP private signing key for this account session. In theory this could be defered until the token request at the end of the athentication flow, but doing it now allows early binding during the PAR request.
+	# Generate DPoP private signing key for this account session. In theory this could be deferred until the token request at the end of the authentication flow, but doing it now allows early binding during the PAR request.
 	dpop_private_jwk = JsonWebKey.generate_key("EC", "P-256", is_private=True)
 
 	# Dynamically compute our "client_id" based on the request HTTP Host
@@ -103,7 +103,7 @@ def oauth_login():
 	get_database().execute_sql("""
 		INSERT INTO oauthrequest
 		(state, authserver_iss, did, handle, pds_url, pkce_verifier, scope, dpop_authserver_nonce, dpop_private_jwk)  
-		VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s);
+		VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);
 		""",
 		[
 			state,
@@ -143,21 +143,20 @@ def oauth_callback():
 	authorization_code = request.args["code"]
 
 	# Lookup auth request by the "state" token (which we randomly generated earlier)
-	# row = query_db(
-	# 	"SELECT * FROM oauth_auth_request WHERE state = ?;",
-	# 	[state],
-	# 	one=True,
-	# )
-	# if row is None:
-	# 	abort(400, "OAuth request not found")
-	#
-	# # Delete row to prevent response replay
-	# query_db("DELETE FROM oauth_auth_request WHERE state = ?;", [state])
-	#
-	# # Verify query param "iss" against earlier oauth request "iss"
-	# assert row["authserver_iss"] == authserver_iss
-	# # This is redundant with the above SQL query, but also double-checking that the "state" param matches the original request
-	# assert row["state"] == state
+	# row = get_database().execute_sql("SELECT * FROM oauthrequest WHERE state = %s;", [state]).fetchone()
+
+	row = OauthRequest.get_or_none(OauthRequest.state == state)
+	if row is None:
+		abort(400, "OAuth request not found")
+
+	# Delete row to prevent response replay
+	get_database().execute_sql("DELETE FROM oauthrequest WHERE state = %s;", [state])
+
+	# Verify query param "iss" against earlier oauth request "iss"
+
+	assert row.authserver_iss == authserver_iss
+	# This is redundant with the above SQL query, but also double-checking that the "state" param matches the original request
+	assert row.state == state
 
 	# Complete the auth flow by requesting auth tokens from the authorization server.
 	client_id, redirect_uri = compute_client_id(request.url_root)
@@ -170,9 +169,9 @@ def oauth_callback():
 	)
 
 	# Now we verify the account authentication against the original request
-	if row["did"]:
+	if row.did:
 		# If we started with an account identifier, this is simple
-		did, handle, pds_url = row["did"], row["handle"], row["pds_url"]
+		did, handle, pds_url = row.did, row.handle, row.pds_url
 		assert tokens["sub"] == did
 	else:
 		# If we started with an auth server URL, now we need to resolve the identity
@@ -186,30 +185,35 @@ def oauth_callback():
 		assert authserver_url == authserver_iss
 
 	# Verify that returned scope matches request (waiting for PDS update)
-	assert row["scope"] == tokens["scope"]
+	assert row.scope == tokens["scope"]
 
 	# Save session (including auth tokens) in database
 	print(f"saving oauth_session to DB  {did}")
-	query_db(
-		"INSERT OR REPLACE INTO oauth_session (did, handle, pds_url, authserver_iss, access_token, refresh_token, dpop_authserver_nonce, dpop_private_jwk) VALUES(?, ?, ?, ?, ?, ?, ?, ?);",
-		[
-			did,
-			handle,
-			pds_url,
-			authserver_iss,
-			tokens["access_token"],
-			tokens["refresh_token"],
-			dpop_authserver_nonce,
-			row["dpop_private_jwk"],
-		],
+
+	# todo INSERT or UPDATE
+	get_database().execute_sql("""
+		INSERT INTO oauthsession
+		 (did, handle, pds_url, authserver_iss, access_token, refresh_token, dpop_authserver_nonce, dpop_private_jwk)
+		 VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+		""",
+	    [
+		    did,
+		    handle,
+		    pds_url,
+		    authserver_iss,
+		    tokens["access_token"],
+		    tokens["refresh_token"],
+		    dpop_authserver_nonce,
+		    row.dpop_private_jwk
+		]
 	)
 
 	# Set a (secure) session cookie in the user's browser, for authentication between the browser and this app
 	session["user_did"] = did
-	# Note that the handle might change over time, and should be re-resolved periodically in a real app
+	# todo: Note that the handle might change over time, and should be re-resolved periodically in a real app
 	session["user_handle"] = handle
 
-	return redirect("/bsky/post")
+	return redirect("http://localhost:5173/login")
 
 
 

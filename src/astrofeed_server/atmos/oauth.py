@@ -10,6 +10,7 @@ from authlib.oauth2.rfc7636 import create_s256_code_challenge
 from requests import Response
 import urllib.request
 
+from astrofeed_lib.database import OauthRequest
 from .security import is_safe_url, hardened_http
 
 
@@ -203,13 +204,13 @@ def send_par_auth_request(
 # Completes the auth flow by sending an initial auth token request.
 # Returns token response (dict) and DPoP nonce (str)
 def initial_token_request(
-    auth_request: dict,
+    auth_request: OauthRequest,
     code: str,
     client_id: str,
     redirect_uri: str,
     client_secret_jwk: JsonWebKey,
 ) -> Tuple[dict, str]:
-    authserver_url = auth_request["authserver_iss"]
+    authserver_url = auth_request.authserver_iss
 
     # Re-fetch server metadata
     authserver_meta = fetch_authserver_meta(authserver_url)
@@ -218,12 +219,12 @@ def initial_token_request(
         "redirect_uri": redirect_uri,
         "grant_type": "authorization_code",
         "code": code,
-        "code_verifier": auth_request["pkce_verifier"]
+        "code_verifier": auth_request.pkce_verifier
     }
 
     token_url = authserver_meta["token_endpoint"]
     dpop_private_jwk = JsonWebKey.import_key(
-        json.loads(auth_request["dpop_private_jwk"])
+        json.loads(auth_request.dpop_private_jwk)
     )
 
     # IMPORTANT: Token URL is untrusted input, SSRF mitigations are needed
@@ -233,7 +234,7 @@ def initial_token_request(
         client_id=client_id,
         client_secret_jwk=client_secret_jwk,
         dpop_private_jwk=dpop_private_jwk,
-        dpop_authserver_nonce=auth_request["dpop_authserver_nonce"],
+        dpop_authserver_nonce=auth_request.dpop_authserver_nonce,
         post_url=token_url,
         post_data=params
     )

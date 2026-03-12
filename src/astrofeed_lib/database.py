@@ -334,42 +334,40 @@ class NormalizedFeedStats(BaseModel):
 #     cid = peewee.CharField()
 
 class OauthRequest(BaseModel):
-    state = peewee.CharField(primary_key=True, index=True, null=False)
-    authserver_iss = peewee.CharField(null=False)
-    did = peewee.CharField()
-    handle  = peewee.CharField()
-    pds_url = peewee.CharField()
-    pkce_verifier = peewee.CharField(null=False)
-    scope = peewee.CharField(null=False)
-    dpop_authserver_nonce = peewee.CharField(null=False)
-    dpop_private_jwk = peewee.CharField(null=False)
+    state = peewee.CharField(primary_key=True, index=True, )
+    authserver_iss = peewee.CharField()
+    did = peewee.CharField(null=True)
+    handle  = peewee.CharField(null=True)
+    pds_url = peewee.CharField(null=True)
+    pkce_verifier = peewee.CharField()
+    scope = peewee.CharField()
+    dpop_authserver_nonce = peewee.CharField()
+    dpop_private_jwk = peewee.CharField()
 
 
 class OauthSession(BaseModel):
-    did = peewee.CharField(primary_key=True, index=True, null=False)
-    handle = peewee.CharField()
-    pds_url = peewee.CharField(null=False)
-    authserver_iss = peewee.CharField(null=False)
-    access_token = peewee.CharField()
-    refresh_token = peewee.CharField()
-    dpop_authserver_nonce  = peewee.CharField(null=False)
-    dpop_pds_nonce = peewee.CharField()
-    dpop_private_jwk = peewee.CharField(null=False)
+    did = peewee.CharField(primary_key=True, index=True)
+    handle = peewee.CharField(null=True)
+    pds_url = peewee.CharField()
+    authserver_iss = peewee.CharField()
+    access_token = peewee.TextField(null=True)
+    refresh_token = peewee.TextField(null=True)
+    dpop_authserver_nonce  = peewee.CharField()
+    dpop_pds_nonce = peewee.CharField(null=True)
+    dpop_private_jwk = peewee.CharField()
 
 
-
-
-with DBConnection() as conn:
-    conn.create_tables(
-        [
-            Post,
-            SubscriptionState,
-            Account,
-            BotActions,
-            ModActions,
-            ActivityLog,
-            NormalizedFeedStats,
-            OauthRequest,
-            OauthSession
-        ]
-    )
+# with DBConnection() as conn:
+#     conn.create_tables(
+#         [
+#             Post,
+#             SubscriptionState,
+#             Account,
+#             BotActions,
+#             ModActions,
+#             ActivityLog,
+#             NormalizedFeedStats,
+#             OauthRequest,
+#             OauthSession
+#         ]
+#     )
