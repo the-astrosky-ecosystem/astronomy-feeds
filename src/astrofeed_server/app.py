@@ -174,6 +174,7 @@ def get_requester_did():
     try:
         requester_did = validate_auth(request)
     except AuthorizationError:
+        logger.warning("Error validating requester DID", exc_info=True)
         requester_did = "Unknown"
     return requester_did
 

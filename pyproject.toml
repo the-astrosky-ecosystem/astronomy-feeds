@@ -27,7 +27,7 @@ dependencies = [
   # astrofeed_lib
   "peewee>=3.16.2,<4.0",
   "pymysql>=1.1.0,<2.0", # If using a MySQL database
-  "atproto==0.0.55",
+  "atproto==0.0.63",
   "emoji>=2.8.0,<3.0",
   "websockets>=13.0",
   # astrofeed_firehose

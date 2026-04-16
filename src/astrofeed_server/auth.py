@@ -1,5 +1,5 @@
 from atproto import DidInMemoryCache, IdResolver, verify_jwt
-from atproto.exceptions import TokenInvalidSignatureError
+from atproto.exceptions import TokenInvalidSignatureError, TokenImmatureSignatureError
 from flask import Request
 
 
@@ -38,3 +38,5 @@ def validate_auth(request: "Request") -> str:
         return verify_jwt(jwt, _ID_RESOLVER.did.resolve_atproto_key).iss
     except TokenInvalidSignatureError as e:
         raise AuthorizationError("Invalid signature") from e
+    except TokenImmatureSignatureError as e:
+        raise AuthorizationError("Immature signature") from e
