@@ -34,7 +34,6 @@ INSERT INTO public.subscriptionstate
 SELECT * from prod_public.subscriptionstate;
 
 -- ActivityLog; take all times Emily has viewed the feeds for now...
--- TODO: replace with anonymizing the DID of users viewing the feed
 DELETE FROM public.activitylog;
 INSERT INTO public.activitylog
 SELECT * FROM (
@@ -43,6 +42,14 @@ SELECT * FROM (
     LIMIT 50000
 )
 ORDER BY request_dt ASC;
+-- anonymize the DID of users viewing the feed (request_user_did field) here!
+/*
+the below code works for simple replacement, but we need to maintain the uniqueness 
+of each did.
+*/
+--UPDATE public.activitylog
+--SET request_user_did = 'did:plc:a'
+--WHERE request_user_did LIKE 'did:plc:%';
 
 -- not taking NormalizedFeedStats for now - maybe generate after the fact?
 
