@@ -1,11 +1,15 @@
+import functools
+
 import regex
+from atproto_client.models.app.bsky.feed.describe_feed_generator import Response
+from requests import exceptions
 
 from authlib.jose import JsonWebKey
 from urllib.parse import urlencode, urlparse
 
-from flask import Blueprint, flash, request, redirect, current_app, session, abort
+from flask import Blueprint, flash, g, jsonify, request, redirect, current_app, session, abort
 
-from astrofeed_lib.database import get_database, OauthRequest
+from astrofeed_lib.database import get_database, OauthRequest, OauthSession
 
 from .identity import is_valid_handle, is_valid_did, resolve_identity, pds_endpoint
 from .oauth import resolve_pds_authserver, fetch_authserver_meta, send_par_auth_request, initial_token_request
@@ -18,11 +22,63 @@ OAUTH_SCOPE = "atproto repo:app.bsky.feed.post?action=create"
 
 atmos_blueprint = Blueprint("atmos", __name__)
 
+@atmos_blueprint.before_request
+def load_logged_in_user():
+	user_did = session.get("user_did")
+
+	print("checking")
+	print(session)
+
+	if user_did is None:
+		g.user = None
+	else:
+		g.user = OauthSession.get_or_none(OauthSession.did == user_did)
+		if g.user is None:
+			print("User not found")
+
+# def login_required(view):
+# 	@functools.wraps(view)
+# 	def wrapped_view(**kwargs):
+# 		if g.user is None:
+# 			return None
+#
+# 		return view(**kwargs)
+#
+# 	return wrapped_view
+
+@atmos_blueprint.route("/test")
+def atmos_test():
+
+	return {"handle":"test-handle"}
+
+@atmos_blueprint.route('/set')
+def set():
+	print("set")
+	session['key'] = 'value'
+	session["user_did"] = "dddid"
+	session["user_handle"] = "hhhhandle"
+	print(session)
+	return 'ok'
+
+@atmos_blueprint.route('/get')
+def get():
+	print(session)
+	return session.get('key', 'not set')
+
+@atmos_blueprint.route("/handle")
+def atmos_handle():
+	handle = None
+
+	if g.user:
+		handle = g.user.handle
+		print( g.user )
+
+	return jsonify({"handle": handle})
+
+
 # Starts the OAuth authorization flow (POST).
-@atmos_blueprint.route("/login", methods=("GET", "POST"))
+@atmos_blueprint.route("/login", methods=("POST",))
 def oauth_login():
-	if request.method != "POST":
-		return "<h1>Hello Matthew</h1>"
 
 	# Login can start with a handle, DID, or auth server URL. We are calling whatever the user supplied the "username".
 	username = request.form["username"]
@@ -46,7 +102,13 @@ def oauth_login():
 
 		pds_url = pds_endpoint(did_doc)
 		print(f"account PDS: {pds_url}")
-		auth_server_url = resolve_pds_authserver(pds_url)
+
+		try:
+			auth_server_url = resolve_pds_authserver(pds_url)
+		except exceptions.ReadTimeout:
+			flash(f"Failed to resolve pds authserver.", "error")
+			return "Error: Failed to resolve pds authserver"
+
 		
 	elif username.startswith("https://") and is_safe_url(username):
 		# When starting with an auth server, we don't know about the account yet.
@@ -78,8 +140,13 @@ def oauth_login():
 	# Generate DPoP private signing key for this account session. In theory this could be deferred until the token request at the end of the authentication flow, but doing it now allows early binding during the PAR request.
 	dpop_private_jwk = JsonWebKey.generate_key("EC", "P-256", is_private=True)
 
+	print( request.url_root)
+
 	# Dynamically compute our "client_id" based on the request HTTP Host
 	client_id, redirect_uri = compute_client_id(request.url_root)
+
+	print( client_id )
+	print( redirect_uri )
 
 	# Submit OAuth Pushed Authentication Request (PAR). We could have constructed a more complex authentication request URL below instead, but there are some advantages with PAR, including failing fast, early DPoP binding, and no URL length limitations.
 	pkce_verifier, state, dpop_authserver_nonce, resp = send_par_auth_request(
@@ -95,10 +162,10 @@ def oauth_login():
 	if resp.status_code == 400:
 		print(f"PAR HTTP 400: {resp.json()}")
 	resp.raise_for_status()
-	# This field is confusingly named: it is basically a token to refering back to the successful PAR request.
+	# This field is confusingly named: it is basically a token refering back to the successful PAR request.
 	par_request_uri = resp.json()["request_uri"]
 
-	print(f"SHOULD BE saving oauth_auth_request to DB  state={state}")
+	print( resp.json() )
 
 	get_database().execute_sql("""
 		INSERT INTO oauthrequest
@@ -133,18 +200,21 @@ def oauth_login():
 # Endpoint for receiving "callback" responses from the Authorization Server, to complete the auth flow.
 @atmos_blueprint.route("/callback")
 def oauth_callback():
-	if error := request.args.get("error"):
-		error_description = request.args.get("error_description", "")
-		flash(f"Authorization failed: {error}: {error_description}", "error")
-		return redirect("/atmos/login")
+	# if error := request.args.get("error"):
+	# 	error_description = request.args.get("error_description", "")
+	# 	flash(f"Authorization failed: {error}: {error_description}", "error")
+	# 	return redirect("/atmos/login")
 
-	state = request.args["state"]
-	authserver_iss = request.args["iss"]
-	authorization_code = request.args["code"]
+	if "state" not in request.args or \
+		"iss" not in request.args or \
+		"code" not in request.args :
+		return # todo error
+
+	state = request.args.get("state")
+	authserver_iss = request.args.get("iss")
+	authorization_code = request.args.get("code")
 
 	# Lookup auth request by the "state" token (which we randomly generated earlier)
-	# row = get_database().execute_sql("SELECT * FROM oauthrequest WHERE state = %s;", [state]).fetchone()
-
 	row = OauthRequest.get_or_none(OauthRequest.state == state)
 	if row is None:
 		abort(400, "OAuth request not found")
@@ -210,10 +280,11 @@ def oauth_callback():
 
 	# Set a (secure) session cookie in the user's browser, for authentication between the browser and this app
 	session["user_did"] = did
+
 	# todo: Note that the handle might change over time, and should be re-resolved periodically in a real app
 	session["user_handle"] = handle
 
-	return redirect("http://localhost:5173/login")
+	return {"handle": handle}
 
 
 
@@ -222,8 +293,10 @@ def compute_client_id(url_root):
 	parsed_url = urlparse(url_root)
 	if parsed_url.hostname in ["localhost", "127.0.0.1"]:
 		# for localhost testing, see https://atproto.com/specs/oauth#localhost-client-development
-		redirect_uri = f"http://127.0.0.1:{parsed_url.port}/atmos/callback"
-		client_id = "http://localhost?" + urlencode({
+		# (essentially, this allows you to embed details for use remotely and bypass localhost network problems)
+		fake_uri = "http://localhost"
+		redirect_uri = "http://127.0.0.1:5173/login/callback"
+		client_id = fake_uri + "?" + urlencode({
 			"redirect_uri": redirect_uri,
 			"scope": OAUTH_SCOPE,
 		})

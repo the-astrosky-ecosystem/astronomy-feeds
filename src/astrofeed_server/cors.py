@@ -18,4 +18,4 @@ def enable_cross_origin_requests(app):
     logger.warning("--- CROSS-ORIGIN REQUEST HEADER WARNING ---")
     from flask_cors import CORS
 
-    CORS(app)
+    CORS(app, origins=["http://127.0.0.1:5173"],supports_credentials=True)

@@ -48,8 +48,11 @@ def is_valid_authserver_meta(obj: dict, url: str) -> bool:
 def resolve_pds_authserver(url: str) -> str:
     # IMPORTANT: PDS endpoint URL is untrusted input, SSRF mitigations are needed
     assert is_safe_url(url)
+
+    print( "request:resolve_pds_authserver(): GET: " + url )
     with hardened_http.get_session() as sess:
         resp = sess.get(f"{url}/.well-known/oauth-protected-resource")
+
     resp.raise_for_status()
     # Additionally check that status is exactly 200 (not just 2xx)
     assert resp.status_code == 200
@@ -61,6 +64,8 @@ def resolve_pds_authserver(url: str) -> str:
 def fetch_authserver_meta(url: str) -> dict:
     # IMPORTANT: Authorization Server URL is untrusted input, SSRF mitigations are needed
     assert is_safe_url(url)
+
+    print( "request:fetch_authserver_meta():GET: " + url )
     with hardened_http.get_session() as sess:
         resp = sess.get(f"{url}/.well-known/oauth-authorization-server")
     resp.raise_for_status()
@@ -138,6 +143,8 @@ def auth_server_post(
 
     # IMPORTANT: This method may be passed untrusted URLs as input, SSRF mitigations are needed
     assert is_safe_url(post_url)
+
+    print( "request:auth_server_post():POST: " + post_url )
     with hardened_http.get_session() as sess:
         resp = sess.post(post_url, data=post_data, headers={"DPoP": dpop_proof})
 
@@ -145,10 +152,11 @@ def auth_server_post(
     if is_use_dpop_nonce_error_response(resp):
         dpop_authserver_nonce = resp.headers["DPoP-Nonce"]
         print(f"retrying with new auth server DPoP nonce: {dpop_authserver_nonce}")
-        # print(server_nonce)
+
         dpop_proof = authserver_dpop_jwt(
             "POST", post_url, dpop_authserver_nonce, dpop_private_jwk
         )
+        print( "request:auth_server_post():POST: " + post_url )
         with hardened_http.get_session() as sess:
             resp = sess.post(post_url, data=post_data, headers={"DPoP": dpop_proof})
 
@@ -399,6 +407,8 @@ def pds_authed_req(method: str, url: str, user: dict, db: Any, body=None) -> Any
             dpop_private_jwk,
         )
 
+
+        print( "request:pds_authed_req():POST: " + url )
         with hardened_http.get_session() as sess:
             resp = sess.post(
                 url,

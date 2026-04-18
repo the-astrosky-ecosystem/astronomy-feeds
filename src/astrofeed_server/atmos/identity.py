@@ -73,6 +73,7 @@ def resolve_handle(handle: str) -> Optional[str]:
     # then try HTTP well-known
     # IMPORTANT: 'handle' domain is untrusted user input. SSRF mitigations are necessary
     try:
+        print( "request:resolve_handle():GET: " + handle )
         with hardened_http.get_session() as sess:
             resp = sess.get(f"https://{handle}/.well-known/atproto-did")
     except Exception as e:
@@ -90,6 +91,7 @@ def resolve_handle(handle: str) -> Optional[str]:
 def resolve_did(did: str) -> Optional[dict]:
     if did.startswith("did:plc:"):
         # NOTE: 'did' is untrusted input, but has been validated by regex by this point
+        print( "request:pds_authed_req():GET: " + "https://plc.directory/" )
         resp = requests.get(f"https://plc.directory/{did}")
         if resp.status_code != 200:
             return None
@@ -101,6 +103,7 @@ def resolve_did(did: str) -> Optional[dict]:
         # "handle" validation works to check that domain is a simple hostname
         assert is_valid_handle(domain)
         try:
+            print( "request:resolve_did():GET: " + domain )
             with hardened_http.get_session() as sess:
                 resp = sess.get(f"https://{domain}/.well-known/did.json")
         except requests.exceptions.ConnectionError:
