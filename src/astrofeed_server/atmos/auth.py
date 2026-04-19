@@ -24,46 +24,26 @@ atmos_blueprint = Blueprint("atmos", __name__)
 
 @atmos_blueprint.before_request
 def load_logged_in_user():
-	user_did = session.get("user_did")
+	user = None
 
-	print("checking")
-	print(session)
+	if user_did:= session.get("user_did", None):
+		user = OauthSession.get_or_none(OauthSession.did == user_did)
+		if user is None:
+			print(f"Error: user_did '{user_did}' not found in session")
+			session["user_did"] = None
 
-	if user_did is None:
-		g.user = None
-	else:
-		g.user = OauthSession.get_or_none(OauthSession.did == user_did)
+	g.user = user
+
+# Use on routes which need authentication
+def login_required(view):
+	@functools.wraps(view)
+	def wrapped_view(**kwargs):
 		if g.user is None:
-			print("User not found")
+			return None
 
-# def login_required(view):
-# 	@functools.wraps(view)
-# 	def wrapped_view(**kwargs):
-# 		if g.user is None:
-# 			return None
-#
-# 		return view(**kwargs)
-#
-# 	return wrapped_view
+		return view(**kwargs)
 
-@atmos_blueprint.route("/test")
-def atmos_test():
-
-	return {"handle":"test-handle"}
-
-@atmos_blueprint.route('/set')
-def set():
-	print("set")
-	session['key'] = 'value'
-	session["user_did"] = "dddid"
-	session["user_handle"] = "hhhhandle"
-	print(session)
-	return 'ok'
-
-@atmos_blueprint.route('/get')
-def get():
-	print(session)
-	return session.get('key', 'not set')
+	return wrapped_view
 
 @atmos_blueprint.route("/handle")
 def atmos_handle():
@@ -71,12 +51,11 @@ def atmos_handle():
 
 	if g.user:
 		handle = g.user.handle
-		print( g.user )
 
 	return jsonify({"handle": handle})
 
 
-# Starts the OAuth authorization flow (POST).
+# Starts the OAuth authorization flow (/callback should follow this)
 @atmos_blueprint.route("/login", methods=("POST",))
 def oauth_login():
 
@@ -101,7 +80,6 @@ def oauth_login():
 			return "Error: Failed to resolve identity"
 
 		pds_url = pds_endpoint(did_doc)
-		print(f"account PDS: {pds_url}")
 
 		try:
 			auth_server_url = resolve_pds_authserver(pds_url)
@@ -121,13 +99,13 @@ def oauth_login():
 		except Exception:
 			# If initial_url is an AS url, strip any trailing slashes
 			auth_server_url = initial_url.rstrip("/")
+
 	else:
 		flash("Not a valid handle, DID, or auth server URL", "error")
 		return "Error: Not a valid handle, DID, or auth server URL"
 
 	# Fetch Auth Server metadata. For a self-hosted PDS, this will be the same server (the PDS). For large-scale PDS hosts like Bluesky, this may be a separate "entryway" server filling the Auth Server role.
 	# IMPORTANT: Authorization Server URL is untrusted input, SSRF mitigations are needed
-	print(f"account Authorization Server: {auth_server_url}")
 	assert is_safe_url(auth_server_url)
 	try:
 		authserver_meta = fetch_authserver_meta(auth_server_url)
@@ -140,13 +118,8 @@ def oauth_login():
 	# Generate DPoP private signing key for this account session. In theory this could be deferred until the token request at the end of the authentication flow, but doing it now allows early binding during the PAR request.
 	dpop_private_jwk = JsonWebKey.generate_key("EC", "P-256", is_private=True)
 
-	print( request.url_root)
-
 	# Dynamically compute our "client_id" based on the request HTTP Host
 	client_id, redirect_uri = compute_client_id(request.url_root)
-
-	print( client_id )
-	print( redirect_uri )
 
 	# Submit OAuth Pushed Authentication Request (PAR). We could have constructed a more complex authentication request URL below instead, but there are some advantages with PAR, including failing fast, early DPoP binding, and no URL length limitations.
 	pkce_verifier, state, dpop_authserver_nonce, resp = send_par_auth_request(
@@ -162,7 +135,8 @@ def oauth_login():
 	if resp.status_code == 400:
 		print(f"PAR HTTP 400: {resp.json()}")
 	resp.raise_for_status()
-	# This field is confusingly named: it is basically a token refering back to the successful PAR request.
+
+	# This field is confusingly named: it is basically a token referring back to the successful PAR request.
 	par_request_uri = resp.json()["request_uri"]
 
 	print( resp.json() )
@@ -191,19 +165,12 @@ def oauth_login():
 	assert is_safe_url(auth_url)
 	qparam = urlencode({"client_id": client_id, "request_uri": par_request_uri})
 
-
-	print("redirect url is", f"{auth_url}?{qparam}" )
-
 	return redirect(f"{auth_url}?{qparam}")
 
 
 # Endpoint for receiving "callback" responses from the Authorization Server, to complete the auth flow.
 @atmos_blueprint.route("/callback")
 def oauth_callback():
-	# if error := request.args.get("error"):
-	# 	error_description = request.args.get("error_description", "")
-	# 	flash(f"Authorization failed: {error}: {error_description}", "error")
-	# 	return redirect("/atmos/login")
 
 	if "state" not in request.args or \
 		"iss" not in request.args or \
@@ -223,7 +190,6 @@ def oauth_callback():
 	get_database().execute_sql("DELETE FROM oauthrequest WHERE state = %s;", [state])
 
 	# Verify query param "iss" against earlier oauth request "iss"
-
 	assert row.authserver_iss == authserver_iss
 	# This is redundant with the above SQL query, but also double-checking that the "state" param matches the original request
 	assert row.state == state
@@ -258,9 +224,7 @@ def oauth_callback():
 	assert row.scope == tokens["scope"]
 
 	# Save session (including auth tokens) in database
-	print(f"saving oauth_session to DB  {did}")
-
-	# todo INSERT or UPDATE
+	# todo Should this be INSERT or UPDATE?
 	get_database().execute_sql("""
 		INSERT INTO oauthsession
 		 (did, handle, pds_url, authserver_iss, access_token, refresh_token, dpop_authserver_nonce, dpop_private_jwk)
