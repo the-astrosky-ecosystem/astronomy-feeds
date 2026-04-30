@@ -1,7 +1,7 @@
 import functools
 
 import regex
-from atproto_client.models.app.bsky.feed.describe_feed_generator import Response
+
 from requests import exceptions
 
 from authlib.jose import JsonWebKey
@@ -254,19 +254,19 @@ def oauth_callback():
 
 # Dynamically compute our "client_id" based on the request HTTP Host
 def compute_client_id(url_root):
+
+	redirect_uri = current_app.config["ASTROSKY_WEBSITE"] + "/login/callback"
+
 	parsed_url = urlparse(url_root)
 	if parsed_url.hostname in ["localhost", "127.0.0.1"]:
 		# for localhost testing, see https://atproto.com/specs/oauth#localhost-client-development
-		# (essentially, this allows you to embed details for use remotely and bypass localhost network problems)
-		fake_uri = "http://localhost"
-		redirect_uri = "http://127.0.0.1:5173/login/callback"
-		client_id = fake_uri + "?" + urlencode({
+		# (essentially, this allows you to test with localhost by embedding details the remote authenticator will parse)
+		client_id = "http://localhost" + "?" + urlencode({
 			"redirect_uri": redirect_uri,
 			"scope": OAUTH_SCOPE,
 		})
 	else:
-		app_url = url_root.replace("http://", "https://")
-		redirect_uri = f"{app_url}oauth/callback"
-		client_id = f"{app_url}oauth-client-metadata.json"
+		# TODO MATTT Workout what is needed here
+		client_id = current_app.config["ASTROSKY_WEBSITE"] + "/oauth-client-metadata.json"
 
 	return client_id, redirect_uri

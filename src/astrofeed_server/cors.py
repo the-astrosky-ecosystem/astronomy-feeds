@@ -1,6 +1,5 @@
 from astrofeed_lib import config, logger
 
-
 def enable_cross_origin_requests(app):
     if config.ASTROFEED_PRODUCTION:
         logger.critical(
@@ -16,6 +15,6 @@ def enable_cross_origin_requests(app):
     logger.warning("DO NOT use server in production in current state!")
     logger.warning("DO NOT allow non-local connections to this server!")
     logger.warning("--- CROSS-ORIGIN REQUEST HEADER WARNING ---")
-    from flask_cors import CORS
 
-    CORS(app, origins=["http://127.0.0.1:5173"], supports_credentials=True)
+    from flask_cors import CORS
+    CORS(app, origins=[app.config["ASTROSKY_WEBSITE"]], supports_credentials=True)
