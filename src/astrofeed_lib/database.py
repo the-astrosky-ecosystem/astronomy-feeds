@@ -1,3 +1,5 @@
+import time
+
 import peewee
 from peewee import DatabaseProxy
 from datetime import datetime, timezone
@@ -357,17 +359,27 @@ class OauthSession(BaseModel):
     dpop_private_jwk = peewee.CharField()
 
 
-# with DBConnection() as conn:
-#     conn.create_tables(
-#         [
-#             Post,
-#             SubscriptionState,
-#             Account,
-#             BotActions,
-#             ModActions,
-#             ActivityLog,
-#             NormalizedFeedStats,
-#             OauthRequest,
-#             OauthSession
-#         ]
-#     )
+
+if __name__ == "__main__":
+    
+    time.sleep(1)
+    text = input("Do you want to create new tables? Type 'y' if yes: ")
+    
+    if text == "y":
+        print("Creating tables...")
+        with DBConnection() as conn:
+            conn.create_tables(
+                [
+                    Post,
+                    SubscriptionState,
+                    Account,
+                    BotActions,
+                    ModActions,
+                    ActivityLog,
+                    NormalizedFeedStats,
+                    OauthRequest,
+                    OauthSession
+                ]
+            )
+    else:
+        print("Doing nothing and exiting.")
