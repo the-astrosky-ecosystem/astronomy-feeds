@@ -73,15 +73,12 @@ DECLARE
 	did obfuscation_map.request_user_did%TYPE;
 	obfuscated_did obfuscation_map.obfuscated_user_did%TYPE;
 BEGIN
-	RAISE NOTICE 'Entering obfuscation function.';
-
 	FOR obfuscation_map_row IN
 	SELECT * FROM obfuscation_map
 	ORDER BY 1
 	LOOP
 		did = obfuscation_map_row.request_user_did;
 		obfuscated_did = obfuscation_map_row.obfuscated_user_did;
-		RAISE NOTICE 'replacing user DID % with obfuscated DID %', quote_ident(did), quote_ident(obfuscated_did);
 		UPDATE public.activitylog
 		SET request_user_did = obfuscated_did
 		WHERE request_user_did = did;
