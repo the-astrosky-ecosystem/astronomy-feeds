@@ -34,11 +34,15 @@ dependencies = [
   "uvloop>=0.20", # Has a faster async implementation than others
   "faster-fifo>=1.5.2,<2.0",
   # astrofeed_server
-  "Flask>=2.3.2,<3.0",
-  "gunicorn>=20.1.0,",
+  "flask[dotenv]>=2.3.2,<3.0",
+  "gunicorn>=20.1.0",
   "psycopg2-binary>=2.9.10",
   "flask-cors>=5.0.1",
   "pillow>=11.3.0",
+  "authlib>=1.6.8",
+  "regex>=2026.2.19",
+  "requests>=2.32.5",
+  "requests-hardened>=1.2.0",
 ]
 
 [project.optional-dependencies]
