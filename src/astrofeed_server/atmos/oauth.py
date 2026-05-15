@@ -378,12 +378,14 @@ def is_use_dpop_nonce_error_response(resp: Response):
         return False
     www_authenticate = resp.headers.get("WWW-Authenticate")
     if www_authenticate:
+
         try:
             scheme, params = parse_www_authenticate(www_authenticate)
             if scheme.lower() == "dpop" and params.get("error") == "use_dpop_nonce":
                 return True
-        except:
+        except: # noqa
             pass
+       
     json_body = resp.json()
     if isinstance(json_body, dict) and json_body.get("error") == "use_dpop_nonce":
         return True
@@ -427,7 +429,7 @@ def pds_authed_req(method: str, url: str, user: dict, db: Any, body=None) -> Any
             # update session database with new nonce
             cur = db.cursor()
             cur.execute(
-                "UPDATE oauth_session SET dpop_pds_nonce = ? WHERE did = ?;",
+                "UPDATE oauthsession SET dpop_pds_nonce = ? WHERE did = ?;",
                 [dpop_pds_nonce, user["did"]],
             )
             db.commit()

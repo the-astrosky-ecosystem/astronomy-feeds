@@ -1,15 +1,13 @@
 import functools
-
 import regex
-
 from requests import exceptions
 
 from authlib.jose import JsonWebKey
 from urllib.parse import urlencode, urlparse
-
-from flask import Blueprint, flash, g, jsonify, request, redirect, current_app, session, abort
+from flask import Blueprint, g, jsonify, request, redirect, current_app, session, abort
 
 from astrofeed_lib.database import get_database, OauthRequest, OauthSession
+from astrofeed_lib import logger
 
 from .identity import is_valid_handle, is_valid_did, resolve_identity, pds_endpoint
 from .oauth import resolve_pds_authserver, fetch_authserver_meta, send_par_auth_request, initial_token_request
@@ -76,7 +74,7 @@ def oauth_login():
 		try:
 			did, handle, did_doc = resolve_identity(username)
 		except Exception as e:
-			flash(f"Failed to resolve identity: {e}", "error")
+			logger.error(f"Failed to resolve identity: {e}")
 			return "Error: Failed to resolve identity"
 
 		pds_url = pds_endpoint(did_doc)
@@ -84,7 +82,7 @@ def oauth_login():
 		try:
 			auth_server_url = resolve_pds_authserver(pds_url)
 		except exceptions.ReadTimeout:
-			flash(f"Failed to resolve pds authserver.", "error")
+			logger.error(f"Failed to resolve pds authserver: {pds_url}")
 			return "Error: Failed to resolve pds authserver"
 
 		
@@ -101,7 +99,7 @@ def oauth_login():
 			auth_server_url = initial_url.rstrip("/")
 
 	else:
-		flash("Not a valid handle, DID, or auth server URL", "error")
+		logger.error(f"Not a valid handle, DID, or auth server URL: {username}")
 		return "Error: Not a valid handle, DID, or auth server URL"
 
 	# Fetch Auth Server metadata. For a self-hosted PDS, this will be the same server (the PDS). For large-scale PDS hosts like Bluesky, this may be a separate "entryway" server filling the Auth Server role.
@@ -111,8 +109,8 @@ def oauth_login():
 		authserver_meta = fetch_authserver_meta(auth_server_url)
 	except Exception as err:
 		print(f"failed to fetch auth server metadata: {err}")
-		# raise err
-		flash("Failed to fetch Auth Server (Entryway) OAuth metadata", "error")
+
+		logger.error(f"Failed to fetch Auth Server (Entryway) OAuth metadata: {auth_server_url}")
 		return "Error: Failed to fetch Auth Server (Entryway) OAuth metadata"
 
 	# Generate DPoP private signing key for this account session. In theory this could be deferred until the token request at the end of the authentication flow, but doing it now allows early binding during the PAR request.
@@ -175,7 +173,7 @@ def oauth_callback():
 	if "state" not in request.args or \
 		"iss" not in request.args or \
 		"code" not in request.args :
-		return # todo error
+		return "Error: not a valid request"
 
 	state = request.args.get("state")
 	authserver_iss = request.args.get("iss")

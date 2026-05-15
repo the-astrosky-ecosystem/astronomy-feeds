@@ -4,6 +4,7 @@ from threading import Thread, Event
 from typing import Final
 
 from flask import Flask, jsonify, request, Response
+from dotenv import load_dotenv
 from authlib.jose import JsonWebKey
 
 from astrofeed_lib import config, logger
@@ -27,7 +28,6 @@ from .atmos.auth import atmos_blueprint
 _FEED_LOG_RETURN_LIMIT: Final[int] = 50
 
 # todo: figure out why this isn't called automatically
-from dotenv import load_dotenv
 load_dotenv()
 
 # -----------------------------------
