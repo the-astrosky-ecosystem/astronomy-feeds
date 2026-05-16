@@ -57,7 +57,11 @@ WHERE request_user_did != 'Unknown';
 ALTER TABLE obfuscation_map
 ADD COLUMN obfuscated_user_did varchar(255) UNIQUE;
 
-/* fill obfuscated DID column by prepending appropriate DID identifiers to random UUIDs */
+/* catch all for anything not matched by a specific pattern */
+UPDATE obfuscation_map
+SET obfuscated_user_did = gen_random_uuid();
+
+/* rules for DIDs with particular patterns to preserve through obfuscation */
 UPDATE obfuscation_map
 SET obfuscated_user_did = 'did:plc:' || gen_random_uuid()
 WHERE request_user_did LIKE 'did:plc:%';
