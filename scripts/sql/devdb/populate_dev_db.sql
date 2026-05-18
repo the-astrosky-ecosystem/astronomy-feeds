@@ -34,7 +34,6 @@ INSERT INTO public.subscriptionstate
 SELECT * from prod_public.subscriptionstate;
 
 -- ActivityLog; take all times Emily has viewed the feeds for now...
--- TODO: replace with anonymizing the DID of users viewing the feed
 DELETE FROM public.activitylog;
 INSERT INTO public.activitylog
 SELECT * FROM (
@@ -43,6 +42,57 @@ SELECT * FROM (
     LIMIT 50000
 )
 ORDER BY request_dt ASC;
+
+/* anonymize user DIDs in activity log
+
+start by gathering all unique user DIDs from activity log into a temporary table */
+DROP TABLE IF EXISTS obfuscation_map;
+CREATE TEMPORARY TABLE obfuscation_map ON COMMIT DROP
+AS
+SELECT DISTINCT ON (request_user_did) request_user_did
+FROM public.activitylog
+WHERE request_user_did != 'Unknown';
+
+/* add a column for corresponding obfuscated did */
+ALTER TABLE obfuscation_map
+ADD COLUMN obfuscated_user_did varchar(255) UNIQUE;
+
+/* catch all for anything not matched by a specific pattern */
+UPDATE obfuscation_map
+SET obfuscated_user_did = gen_random_uuid();
+
+/* rules for DIDs with particular patterns to preserve through obfuscation */
+UPDATE obfuscation_map
+SET obfuscated_user_did = 'did:plc:' || gen_random_uuid()
+WHERE request_user_did LIKE 'did:plc:%';
+
+UPDATE obfuscation_map
+SET obfuscated_user_did = 'did:web:' || gen_random_uuid()
+WHERE request_user_did LIKE 'did:web:%';
+
+/* overwrite original DIDs in table with obfuscated DIDs (possibly is a way to do this without scripting, but I didn't find it) */
+CREATE OR REPLACE FUNCTION obfuscate() RETURNS integer AS $$
+DECLARE
+	obfuscation_map_row obfuscation_map%ROWTYPE;
+	did obfuscation_map.request_user_did%TYPE;
+	obfuscated_did obfuscation_map.obfuscated_user_did%TYPE;
+BEGIN
+	FOR obfuscation_map_row IN
+	SELECT * FROM obfuscation_map
+	ORDER BY 1
+	LOOP
+		did = obfuscation_map_row.request_user_did;
+		obfuscated_did = obfuscation_map_row.obfuscated_user_did;
+		UPDATE public.activitylog
+		SET request_user_did = obfuscated_did
+		WHERE request_user_did = did;
+	END LOOP;
+
+	RETURN 1;
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT obfuscate();
 
 -- not taking NormalizedFeedStats for now - maybe generate after the fact?
 
