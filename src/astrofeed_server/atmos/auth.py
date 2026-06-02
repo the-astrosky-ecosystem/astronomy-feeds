@@ -1,5 +1,7 @@
 import functools
 import regex
+from atproto_client.models.app.bsky.feed.get_list_feed import Response
+from playhouse.shortcuts import model_to_dict
 from requests import exceptions
 
 from authlib.jose import JsonWebKey
@@ -10,7 +12,7 @@ from astrofeed_lib.database import get_database, OauthRequest, OauthSession
 from astrofeed_lib import logger
 
 from .identity import is_valid_handle, is_valid_did, resolve_identity, pds_endpoint
-from .oauth import resolve_pds_authserver, fetch_authserver_meta, send_par_auth_request, initial_token_request
+from .oauth import resolve_pds_authserver, fetch_authserver_meta, send_par_auth_request, initial_token_request, revoke_token_request
 from .security import is_safe_url
 
 
@@ -25,8 +27,12 @@ def load_logged_in_user():
 	user = None
 
 	if user_did:= session.get("user_did", None):
-		user = OauthSession.get_or_none(OauthSession.did == user_did)
-		if user is None:
+		result = OauthSession.get_or_none(OauthSession.did == user_did)
+		
+		if result :
+			user = model_to_dict(result)
+			
+		else:
 			print(f"Error: user_did '{user_did}' not found in session")
 			session["user_did"] = None
 
@@ -48,7 +54,7 @@ def atmos_handle():
 	handle = None
 
 	if g.user:
-		handle = g.user.handle
+		handle = g.user["handle"]
 
 	return jsonify({"handle": handle})
 
@@ -249,6 +255,22 @@ def oauth_callback():
 	return {"handle": handle}
 
 
+@login_required
+@atmos_blueprint.route("/logout")
+def oauth_logout():
+	client_id, _ = compute_client_id(request.url_root)
+
+	try:
+		revoke_token_request(g.user, client_id, current_app.config["APP_CLIENT__SECRET__JWK"])
+	except Exception as e:
+		print("Error during token revocation:", e)
+		# but still proceed to delete the session on our end
+
+	get_database().execute_sql("DELETE FROM oauthsession WHERE did = %s", [g.user["did"]])
+	session.clear()
+	
+	return {"response":"OK"}
+
 
 # Dynamically compute our "client_id" based on the request HTTP Host
 def compute_client_id(url_root):
@@ -258,13 +280,12 @@ def compute_client_id(url_root):
 	parsed_url = urlparse(url_root)
 	if parsed_url.hostname in ["localhost", "127.0.0.1"]:
 		# for localhost testing, see https://atproto.com/specs/oauth#localhost-client-development
-		# (essentially, this allows you to test with localhost by embedding details the remote authenticator will parse)
+		# (essentially, this allows the remote server to get details via url instead of website/oauth-client-metadata.json)
 		client_id = "http://localhost" + "?" + urlencode({
 			"redirect_uri": redirect_uri,
 			"scope": OAUTH_SCOPE,
 		})
 	else:
-		# TODO MATTT Workout what is needed here
 		client_id = current_app.config["ASTROSKY_WEBSITE"] + "/oauth-client-metadata.json"
 
 	return client_id, redirect_uri

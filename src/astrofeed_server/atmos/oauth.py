@@ -362,12 +362,14 @@ def pds_dpop_jwt(
     ).decode("utf-8")
     return dpop_proof
 
+
 # Minimal www-authenticate header parser, only supports the format expected for DPoP nonce errors
 def parse_www_authenticate(data: str) -> Tuple[str, dict]:
-	scheme, _, params = data.partition(" ")
-	items = urllib.request.parse_http_list(params)
-	opts = urllib.request.parse_keqv_list(items)
-	return scheme, opts
+   scheme, _, params = data.partition(" ")
+   items = urllib.request.parse_http_list(params)
+   opts = urllib.request.parse_keqv_list(items)
+   return scheme, opts
+
 
 # A resource server may signal the need for a [new] DPoP nonce via one of two methods
 # 1. WWW-Authenticate header with paramater error="use_dpop_nonce" (see https://datatracker.ietf.org/doc/html/rfc9449#RSNonce)
@@ -438,3 +440,4 @@ def pds_authed_req(method: str, url: str, user: dict, db: Any, body=None) -> Any
         break
 
     return resp
+
