@@ -67,6 +67,7 @@ uv run -m astrofeed_firehose
 **Mandatory in production:**
 
 - `ASTROFEED_PRODUCTION` - set to True to instead connect to a remote MySQL database
+- `ASTROFEED_DEV_TOKEN` - specifies a token used to download the developer database
 
 **Optional settings:**
 
