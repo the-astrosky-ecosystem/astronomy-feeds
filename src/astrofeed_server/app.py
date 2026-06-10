@@ -1,8 +1,10 @@
+import os
+
 import signal
 from threading import Thread, Event
 from typing import Final
 
-from flask import Flask, jsonify, request, Response
+from flask import Flask, jsonify, request, Response, send_from_directory, current_app
 
 from astrofeed_lib import config, logger
 from astrofeed_lib.algorithm import (
@@ -259,6 +261,26 @@ def get_feed_log_by_date():
         return "Ensure the Date is in YYYY-MM-DD format", 400
     return jsonify(body)
 
+@app.route("/api/dev.downloadDevDB", methods=["GET"])
+# http://127.0.0.1:8000/api/dev.downloadDevDB?token=dev_secret
+def download_dev_db():
+    # authenticate
+    if (dev_token := os.getenv("ASTROFEED_DEV_TOKEN", "")) == "":
+        logger.error("Developer database download token is not set, or is empty; aborting download.")
+        return "Missing Token", 400
+    elif (request.args.get("token", default=None, type=str)) != dev_token:
+        logger.warning("retrieved token does not match stored token; aborting download.")
+        return "wrong token value, aborting download"
+
+    # specify wherever the file is kept (relative to application root path)
+    download_dir = os.path.join(current_app.root_path, "../../files")
+    file_path = os.path.join(download_dir, "devdb.sql")
+    logger.debug(f"looking for file to download at: {file_path}")
+    if os.path.isfile(file_path):
+        return send_from_directory(download_dir, "devdb.sql")
+    else:
+        logger.warning(f"Could not locate file at {file_path} to send for download.", exc_info=True)
+        return "couldn't find the dev database file sorry :/"
 
 # -----------------------------------
 # LOGGING HANDLERS
